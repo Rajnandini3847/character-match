@@ -2,7 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://character-match.vercel.app"),
+  metadataBase: new URL("https://character-match-puce.vercel.app"),
   title: "Character Mirror — which fictional character are you?",
   description:
     "Open your camera, snap a photo, get matched to a fictional character — from Chota Bheem to Hermione. Built with Claude Vision.",

@@ -6,7 +6,7 @@ A camera-based web app that matches your appearance to a fictional character fro
 
 ## Live demo
 
-https://character-match.vercel.app *(requires `ANTHROPIC_API_KEY` env var on the deploy)*
+https://character-match-puce.vercel.app *(requires `ANTHROPIC_API_KEY` env var on the deploy)*
 
 ## How it works
 
