@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { CHARACTER_BY_ID } from "@/lib/characters";
 
 export const runtime = "nodejs";
-
-// 1 hour edge cache; same image rarely changes
-export const revalidate = 3600;
+export const revalidate = 86400; // 24h edge cache — character images don't change
 
 interface WikiSummary {
   thumbnail?: { source: string; width: number; height: number };
   originalimage?: { source: string; width: number; height: number };
   extract?: string;
+  type?: string; // "standard" | "disambiguation" | "no-extract"
+  description?: string;
 }
 
 export async function GET(req: NextRequest) {
@@ -19,35 +19,83 @@ export async function GET(req: NextRequest) {
   const character = CHARACTER_BY_ID[id];
   if (!character) return NextResponse.json({ error: "unknown_id" }, { status: 404 });
 
-  const query = character.wikiQuery || character.name;
-  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
-    query.replace(/ /g, "_")
-  )}`;
-
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "character-match/0.1 (https://github.com/Rajnandini3847/character-match)",
-        Accept: "application/json",
-      },
-      next: { revalidate: 3600 },
-    });
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: "wiki_lookup_failed", status: res.status, query },
-        { status: 200 }
-      );
-    }
-    const data = (await res.json()) as WikiSummary;
+  // Tier 1: explicit override (hand-curated for chars without their own Wiki article)
+  if (character.imageUrl) {
     return NextResponse.json({
       id,
       name: character.name,
-      thumbnail: data.thumbnail?.source ?? null,
-      image: data.originalimage?.source ?? data.thumbnail?.source ?? null,
-      extract: data.extract ?? null,
+      thumbnail: character.imageUrl,
+      image: character.imageUrl,
+      source: "override",
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown_error";
-    return NextResponse.json({ error: "fetch_failed", message }, { status: 200 });
   }
+
+  // Tier 2 + 3: try multiple wiki queries in order, return the first that has an image.
+  // Order matters: character-specific titles first, then the show as a fallback.
+  const candidates = uniqueQueries([
+    character.wikiQuery,
+    `${character.name} (character)`,
+    `${character.name} (${character.source})`,
+    character.name,
+    character.source,
+  ]);
+
+  for (const q of candidates) {
+    const result = await fetchWikiSummary(q);
+    if (result?.thumbnail?.source) {
+      return NextResponse.json({
+        id,
+        name: character.name,
+        thumbnail: result.thumbnail.source,
+        image: result.originalimage?.source ?? result.thumbnail.source,
+        extract: result.extract ?? null,
+        source: `wiki:${q}`,
+      });
+    }
+  }
+
+  return NextResponse.json({
+    id,
+    name: character.name,
+    thumbnail: null,
+    image: null,
+    source: "none",
+    error: "no_image_found",
+  });
+}
+
+async function fetchWikiSummary(query: string): Promise<WikiSummary | null> {
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+    query.replace(/ /g, "_")
+  )}`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "character-match/0.1 (https://github.com/Rajnandini3847/character-match)",
+        Accept: "application/json",
+      },
+      next: { revalidate: 86400 },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as WikiSummary;
+    // Skip disambiguation pages — they almost never carry a useful image
+    if (data.type === "disambiguation") return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function uniqueQueries(arr: (string | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const q of arr) {
+    if (!q) continue;
+    const key = q.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(q);
+  }
+  return out;
 }
