@@ -36,6 +36,24 @@ export default function PlayPage() {
     return () => stopStream();
   }, []);
 
+  // Attach stream once the <video> element is actually in the DOM.
+  // We can't do this inside startCamera() because the video element is only
+  // rendered when phase === "ready", and React hasn't done that render yet
+  // at the moment getUserMedia() resolves.
+  useEffect(() => {
+    if (phase !== "ready") return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+      // play() returns a promise; ignore AbortError when component unmounts
+      video.play().catch((e) => {
+        if (e.name !== "AbortError") console.error("video.play failed", e);
+      });
+    }
+  }, [phase]);
+
   const startCamera = async () => {
     setPhase("starting");
     setError(null);
@@ -45,10 +63,8 @@ export default function PlayPage() {
         audio: false,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      // Switch to "ready" — the useEffect above will attach the stream once
+      // the <video> element has been mounted by React.
       setPhase("ready");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "couldn't open camera";
